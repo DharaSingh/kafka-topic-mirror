@@ -97,7 +97,7 @@ func validateKafkaConfig(cfg *Config) error {
 
 }
 
-func initLogger(cfg *Config) {
+func initLogger() {
 	// Log as JSON instead of the default ASCII formatter.
 	log.SetFormatter(&log.JSONFormatter{})
 
@@ -114,20 +114,24 @@ func main() {
 	if err != nil {
 		log.WithError(err).Fatal("failed to load config")
 	}
-	initLogger(cfg)
+	initLogger()
+
+	InitMetrics(cfg.Monitoring.PromServerAddr)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	run(ctx, cfg)
+
 }
 
-func run(ctx context.Context, cfg *Config) error {
+func run(ctx context.Context, cfg *Config) {
 	sourceMessages := make(chan *KtmMessage, cfg.KafkaOutput.MaxPublish*2)
 	commitMessages := make(chan map[int32]*sarama.ConsumerMessage, 1) // single blocking call, max one batch to wait
 	// start a consumer
 	consumer, err := NewKafkaConsumer(ctx, cfg, sourceMessages, commitMessages)
 	if err != nil {
 		log.Error("failed to create kafka consumer")
-		return err
+		return
 	}
 	wgConsumer := &sync.WaitGroup{}
 	wgConsumer.Add(1)
@@ -136,6 +140,20 @@ func run(ctx context.Context, cfg *Config) error {
 		consumer.Run(ctx)
 	}()
 
-	producer := NewKafkaProducer(cfg.KafkaOutput, sourceMessages, commitMessages)
+	producer, err := NewKafkaProducer(cfg.KafkaOutput, sourceMessages, commitMessages)
+	if err != nil {
+		log.Error("failed to create kafka producer")
+		return
+	}
+	wgProducer := &sync.WaitGroup{}
+	wgProducer.Add(1)
+	go func() {
+		producer.Run()
+		wgProducer.Done()
+	}()
 
+	wgConsumer.Wait()
+	close(sourceMessages)
+	wgProducer.Wait()
+	close(commitMessages)
 }

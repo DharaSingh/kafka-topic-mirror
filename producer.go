@@ -26,10 +26,9 @@ func NewKafkaProducer(output KafkaOutput, inputMsgs chan *KtmMessage, commitMsgs
 
 	producer, err := sarama.NewSyncProducer(output.Brokers, cfg)
 	if err != nil {
-		panic(err)
-		return nil
+		return nil, err
 	}
-	return &KafkaProducer{producer: producer, inputMsgs: inputMsgs, commitMsgs: commitMsgs, batchSize: output.MaxPublish, topic: output.Topic}
+	return &KafkaProducer{producer: producer, inputMsgs: inputMsgs, commitMsgs: commitMsgs, batchSize: output.MaxPublish, topic: output.Topic}, nil
 }
 
 func (p *KafkaProducer) Run() {
